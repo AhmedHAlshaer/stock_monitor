@@ -13,6 +13,9 @@ scikit-learn>=1.3.0
 matplotlib>=3.7.0
 mplfinance>=0.12.10b0
 
+# LLM for Sentiment Analysis
+openai>=1.0.0
+
 # Scheduling
 schedule>=1.2.0
 

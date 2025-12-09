@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from core.stock_data import StockDataFetcher, StockSignal
 from core.regression import RegressionAnalyzer, TrendAnalysis
 from core.visualizer import ChartGenerator
+from core.news_sentiment import SignalGenerator, NewsAnalyzer, MarketDataAnalyzer
 
 load_dotenv()
 
@@ -40,6 +41,7 @@ class StockMonitorBot(commands.Bot):
         self.fetcher = StockDataFetcher(self.watchlist)
         self.analyzer = RegressionAnalyzer()
         self.chart_gen = ChartGenerator(output_dir="./charts")
+        self.signal_gen = SignalGenerator(deepseek_api_key=os.getenv("DEEPSEEK_API_KEY"))
         
         # Alert channel (set via command or env)
         self.alert_channel_id = int(os.getenv("ALERT_CHANNEL_ID", "0"))
@@ -322,6 +324,206 @@ class StockCommands(commands.Cog):
         lines.append("```")
         
         await interaction.followup.send("\n".join(lines))
+    
+    @app_commands.command(name="signal", description="Get comprehensive BUY/HOLD/SELL signal with news & analyst data")
+    @app_commands.describe(ticker="Stock symbol (e.g., AAPL)")
+    async def signal(self, interaction: discord.Interaction, ticker: str):
+        """Comprehensive trading signal combining all factors."""
+        await interaction.response.defer(thinking=True)
+        
+        ticker = ticker.upper()
+        
+        # Get technical analysis first
+        df = self.bot.fetcher.fetch_52_week_data(ticker)
+        technical_score = 0.0
+        
+        if df is not None and not df.empty:
+            analysis = self.bot.analyzer.predict_weekly_trend(df, ticker)
+            if analysis:
+                # Convert trend to score
+                technical_score = analysis.predicted_change_percent / 5  # Normalize
+                technical_score = max(-1, min(1, technical_score))  # Clamp
+        
+        # Generate comprehensive signal
+        try:
+            combined, sentiment, earnings, analyst, insider = self.bot.signal_gen.generate_signal(
+                ticker, 
+                technical_score=technical_score
+            )
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error analyzing **{ticker}**: {str(e)}")
+            return
+        
+        # Build embed
+        signal_colors = {
+            "STRONG BUY": discord.Color.green(),
+            "BUY": discord.Color.from_rgb(144, 238, 144),  # Light green
+            "HOLD": discord.Color.gold(),
+            "SELL": discord.Color.from_rgb(255, 99, 71),  # Tomato
+            "STRONG SELL": discord.Color.red()
+        }
+        
+        signal_emoji = {
+            "STRONG BUY": "🚀",
+            "BUY": "🟢",
+            "HOLD": "🟡",
+            "SELL": "🔴",
+            "STRONG SELL": "💀"
+        }
+        
+        embed = discord.Embed(
+            title=f"{signal_emoji.get(combined.signal, '⚪')} {ticker} - {combined.signal}",
+            description=f"**Combined Score:** {combined.score:+.2f} | **Confidence:** {combined.confidence:.0%}",
+            color=signal_colors.get(combined.signal, discord.Color.blue()),
+            timestamp=datetime.now()
+        )
+        
+        # Add reasoning
+        if combined.reasoning:
+            embed.add_field(
+                name="📋 Key Factors",
+                value="\n".join([f"• {r}" for r in combined.reasoning]),
+                inline=False
+            )
+        
+        # Add warnings
+        if combined.warnings:
+            embed.add_field(
+                name="⚠️ Warnings",
+                value="\n".join([f"• {w}" for w in combined.warnings]),
+                inline=False
+            )
+        
+        # Add component scores
+        embed.add_field(
+            name="📊 Technical",
+            value=f"{combined.technical_score:+.2f}",
+            inline=True
+        )
+        embed.add_field(
+            name="📰 Sentiment",
+            value=f"{combined.sentiment_score:+.2f}",
+            inline=True
+        )
+        embed.add_field(
+            name="🎯 Analysts",
+            value=f"{combined.analyst_score:+.2f}",
+            inline=True
+        )
+        embed.add_field(
+            name="👔 Insiders",
+            value=f"{combined.insider_score:+.2f}",
+            inline=True
+        )
+        
+        # Earnings warning
+        if earnings.days_until is not None:
+            warning = "⚠️ " if earnings.days_until <= 7 else ""
+            embed.add_field(
+                name="📅 Earnings",
+                value=f"{warning}{earnings.days_until} days",
+                inline=True
+            )
+        
+        # Analyst target
+        if analyst.target_price and analyst.upside_percent:
+            embed.add_field(
+                name="🎯 Price Target",
+                value=f"${analyst.target_price:.2f} ({analyst.upside_percent:+.1f}%)",
+                inline=True
+            )
+        
+        # News summary
+        if sentiment.analysis_summary:
+            embed.add_field(
+                name="📰 News Summary",
+                value=sentiment.analysis_summary[:500],
+                inline=False
+            )
+        elif sentiment.bullish_factors or sentiment.bearish_factors:
+            news_summary = ""
+            if sentiment.bullish_factors:
+                news_summary += f"🟢 {', '.join(sentiment.bullish_factors[:2])}\n"
+            if sentiment.bearish_factors:
+                news_summary += f"🔴 {', '.join(sentiment.bearish_factors[:2])}"
+            if news_summary:
+                embed.add_field(
+                    name="📰 News Factors",
+                    value=news_summary,
+                    inline=False
+                )
+        
+        embed.set_footer(text=f"Analysis based on {sentiment.news_count} news articles • Not financial advice")
+        
+        await interaction.followup.send(embed=embed)
+    
+    @app_commands.command(name="news", description="Get latest news and sentiment for a stock")
+    @app_commands.describe(ticker="Stock symbol (e.g., AAPL)")
+    async def news(self, interaction: discord.Interaction, ticker: str):
+        """Get news headlines and sentiment analysis."""
+        await interaction.response.defer(thinking=True)
+        
+        ticker = ticker.upper()
+        
+        # Fetch news and analyze
+        articles = self.bot.signal_gen.news_analyzer.fetch_news(ticker)
+        sentiment = self.bot.signal_gen.news_analyzer.analyze_sentiment(ticker, articles)
+        
+        if not articles:
+            await interaction.followup.send(f"📰 No recent news found for **{ticker}**")
+            return
+        
+        # Build embed
+        sentiment_colors = {
+            "BULLISH": discord.Color.green(),
+            "BEARISH": discord.Color.red(),
+            "NEUTRAL": discord.Color.gold()
+        }
+        sentiment_emoji = {"BULLISH": "🟢", "BEARISH": "🔴", "NEUTRAL": "🟡"}
+        
+        embed = discord.Embed(
+            title=f"📰 {ticker} News & Sentiment",
+            description=f"{sentiment_emoji.get(sentiment.overall_sentiment, '⚪')} **{sentiment.overall_sentiment}** (Score: {sentiment.sentiment_score:+.2f})",
+            color=sentiment_colors.get(sentiment.overall_sentiment, discord.Color.blue()),
+            timestamp=datetime.now()
+        )
+        
+        # Add summary
+        if sentiment.analysis_summary:
+            embed.add_field(
+                name="📋 Analysis",
+                value=sentiment.analysis_summary,
+                inline=False
+            )
+        
+        # Add headlines
+        headlines = []
+        for i, article in enumerate(articles[:5]):
+            age = (datetime.now() - article.published).days
+            age_str = f"{age}d ago" if age > 0 else "Today"
+            headlines.append(f"**{i+1}.** [{article.title[:60]}...]({article.link})\n*{article.publisher} • {age_str}*")
+        
+        embed.add_field(
+            name=f"📰 Latest Headlines ({len(articles)} total)",
+            value="\n\n".join(headlines),
+            inline=False
+        )
+        
+        # Add factors
+        if sentiment.bullish_factors:
+            embed.add_field(
+                name="🟢 Bullish Factors",
+                value="\n".join([f"• {f}" for f in sentiment.bullish_factors[:3]]),
+                inline=True
+            )
+        if sentiment.bearish_factors:
+            embed.add_field(
+                name="🔴 Bearish Factors",
+                value="\n".join([f"• {f}" for f in sentiment.bearish_factors[:3]]),
+                inline=True
+            )
+        
+        await interaction.followup.send(embed=embed)
 
 
 # ============== Scheduled Tasks ==============
