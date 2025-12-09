@@ -16,6 +16,11 @@ mplfinance>=0.12.10b0
 # LLM for Sentiment Analysis
 openai>=1.0.0
 
+# ML Models (Advanced)
+xgboost>=2.0.0
+lightgbm>=4.0.0
+tensorflow>=2.15.0  # Optional - for LSTM
+
 # Scheduling
 schedule>=1.2.0
 
