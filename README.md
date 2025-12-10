@@ -2,11 +2,6 @@
 
 > **An AI-powered Discord bot for intelligent stock analysis combining machine learning ensemble models, LLM-based sentiment analysis, and multi-factor signal generation.**
 
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Discord.py](https://img.shields.io/badge/Discord.py-2.3+-7289da.svg)](https://discordpy.readthedocs.io/)
-[![TensorFlow](https://img.shields.io/badge/TensorFlow-2.15+-orange.svg)](https://tensorflow.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
 ---
 
 ## 🎯 Project Overview
@@ -303,7 +298,7 @@ This bot is for **educational and informational purposes only**. It does not con
 
 ## 📄 License
 
-MIT License - See [LICENSE](LICENSE) for details.
+MIT License 
 
 ---
 
@@ -311,7 +306,7 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 **Ahmed Alshaer**  
 Computer Science @ Indiana University Bloomington  
-[GitHub](https://github.com/AhmedHAlshaer) • [LinkedIn](https://linkedin.com/in/your-profile)
+[GitHub](https://github.com/AhmedHAlshaer) • [LinkedIn](https://linkedin.com/in/ahmealsh)
 
 ---
 
